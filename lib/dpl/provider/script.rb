@@ -15,7 +15,7 @@ module DPL
       end
 
       def push_app
-        puts script
+        puts script.inspect
         context.shell script
         if $?.exitstatus != 0
           raise Error, "Script failed with status #{$?.exitstatus}"
