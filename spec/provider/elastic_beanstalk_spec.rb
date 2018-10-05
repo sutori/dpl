@@ -31,6 +31,10 @@ describe DPL::Provider::ElasticBeanstalk do
     instance_double(Aws::S3::Object, put: Object.new)
   end
 
+  let(:eb_client_mock) do
+    instance_double(Aws::ElasticBeanstalk::Client)
+  end
+
   let(:file_mock) do
     instance_double(File)
   end
@@ -59,10 +63,19 @@ describe DPL::Provider::ElasticBeanstalk do
   end
 
   describe "#push_app" do
-
-    let(:app_version) { Object.new }
+    let(:app_version) do
+      instance_double(
+        Aws::ElasticBeanstalk::Types::ApplicationVersionDescriptionMessage,
+        application_version: instance_double(
+          Aws::ElasticBeanstalk::Types::ApplicationVersionDescription,
+          version_label: 'label'
+        )
+      )
+    end
 
     before :each do
+      allow(Aws::ElasticBeanstalk::Client).to receive(:new).and_return(eb_client_mock)
+
       allow(s3_obj_mock).to receive(:put).with(anything).and_return(Object.new)
       allow(s3_mock).to receive(:bucket).with(bucket_name).and_return(bucket_mock)
 
@@ -83,7 +96,7 @@ describe DPL::Provider::ElasticBeanstalk do
       expect(provider).to receive(:upload).with('file.zip', '/path/to/file.zip').and_call_original
       expect(provider).to receive(:sleep).with(5)
       expect(provider).to receive(:create_app_version).with(s3_obj_mock).and_return(app_version)
-      expect(provider).to receive(:update_app).with(app_version)
+      expect(eb_client_mock).to receive(:update_environment).with(environment_name: 'live', version_label: 'label')
 
       provider.push_app
     end
@@ -100,7 +113,7 @@ describe DPL::Provider::ElasticBeanstalk do
       expect(provider).to receive(:upload).with('file.zip', '/path/to/file.zip').and_call_original
       expect(provider).to receive(:sleep).with(5)
       expect(provider).to receive(:create_app_version).with(s3_obj_mock).and_return(app_version)
-      expect(provider).to receive(:update_app).with(app_version)
+      expect(eb_client_mock).to receive(:update_environment).with(environment_name: 'live', version_label: 'label')
 
       provider.push_app
     end
@@ -120,7 +133,7 @@ describe DPL::Provider::ElasticBeanstalk do
         expect(provider).to receive(:upload).with('file.zip', '/path/to/file.zip').and_call_original
         expect(provider).to receive(:sleep).with(5)
         expect(provider).to receive(:create_app_version).with(s3_obj_mock).and_return(app_version)
-        expect(provider).not_to receive(:update_app).with(app_version)
+        expect(eb_client_mock).to_not receive(:update_environment)
 
         provider.push_app
       end
@@ -140,7 +153,7 @@ describe DPL::Provider::ElasticBeanstalk do
         expect(provider_without_bucket_path).to receive(:upload).with('file.zip', '/path/to/file.zip').and_call_original
         expect(provider_without_bucket_path).to receive(:sleep).with(5)
         expect(provider_without_bucket_path).to receive(:create_app_version).with(s3_obj_mock).and_return(app_version)
-        expect(provider_without_bucket_path).to receive(:update_app).with(app_version)
+        expect(eb_client_mock).to receive(:update_environment).with(environment_name: 'live', version_label: 'label')
 
         provider_without_bucket_path.push_app
       end
@@ -160,8 +173,8 @@ describe DPL::Provider::ElasticBeanstalk do
         expect(provider).to receive(:upload).with('file.zip', '/path/to/file.zip').and_call_original
         expect(provider).to receive(:sleep).with(5)
         expect(provider).to receive(:create_app_version).with(s3_obj_mock).and_return(app_version)
-        expect(provider).to receive(:update_app).with(app_version)
-        expect(provider).to receive(:wait_until_deployed)
+        expect(eb_client_mock).to receive(:update_environment).with(environment_name: 'live', version_label: 'label')
+        expect(provider).to receive(:wait_until_deployed).with("live")
 
         provider.push_app
       end
@@ -176,7 +189,7 @@ describe DPL::Provider::ElasticBeanstalk do
         expect(provider).to receive(:archive_name).and_return('file.zip')
         expect(provider).to receive(:sleep).with(5)
         expect(provider).to receive(:create_app_version).with(s3_obj_mock).and_return(app_version)
-        expect(provider).to receive(:update_app).with(app_version)
+        expect(eb_client_mock).to receive(:update_environment).with(environment_name: 'live', version_label: 'label')
       end
 
       example 'zip_file is an absolute path' do
@@ -206,7 +219,30 @@ describe DPL::Provider::ElasticBeanstalk do
 
         provider.push_app
       end
+    end
 
+    context 'deploy to multiple environments' do
+      let(:env) { 'live,staging' }
+      let(:wait_until_deployed) { true }
+
+      example 'Waits until deployment completes' do
+        allow(bucket_mock).to receive(:exists?).and_return(false)
+        allow(bucket_mock).to receive(:create)
+        allow(bucket_mock).to receive(:object).with("some/app/file.zip").and_return(s3_obj_mock)
+
+        expect(provider).to receive(:s3).and_return(s3_mock).at_least(3).times
+        expect(provider).to receive(:create_zip).and_return('/path/to/file.zip')
+        expect(provider).to receive(:archive_name).and_return('file.zip')
+        expect(provider).to receive(:upload).with('file.zip', '/path/to/file.zip').and_call_original
+        expect(provider).to receive(:sleep).with(5)
+        expect(provider).to receive(:create_app_version).with(s3_obj_mock).and_return(app_version)
+        expect(eb_client_mock).to receive(:update_environment).with(environment_name: 'live', version_label: 'label')
+        expect(eb_client_mock).to receive(:update_environment).with(environment_name: 'staging', version_label: 'label')
+        expect(provider).to receive(:wait_until_deployed).with("live")
+        expect(provider).to receive(:wait_until_deployed).with("staging")
+
+        provider.push_app
+      end
     end
   end
 end

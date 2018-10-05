@@ -52,8 +52,10 @@ module DPL
         sleep 5 #s3 eventual consistency
         version = create_app_version(s3_object)
         if !only_create_app_version
-          update_app(version)
-          wait_until_deployed if options[:wait_until_deployed]
+          env_names.each do |env_name|
+            update_app(env_name, version)
+            wait_until_deployed(env_name) if options[:wait_until_deployed]
+          end
         end
       end
 
@@ -63,8 +65,8 @@ module DPL
         option(:app)
       end
 
-      def env_name
-        options[:env] || context.env['ELASTIC_BEANSTALK_ENV'] || raise(Error, "missing env")
+      def env_names
+        (options[:env] || context.env['ELASTIC_BEANSTALK_ENV'] || raise(Error, "missing env")).split(',')
       end
 
       def version_label
@@ -151,7 +153,7 @@ module DPL
       end
 
       # Wait until EB environment update finishes
-      def wait_until_deployed
+      def wait_until_deployed(env_name)
         errorEvents = 0 # errors counter, should remain 0 for successful deployment
         events = []
 
@@ -184,10 +186,10 @@ module DPL
         if errorEvents > 0 then error("Deployment failed.") end
       end
 
-      def update_app(version)
+      def update_app(env_name, version)
         options = {
           :environment_name  => env_name,
-          :version_label     => version[:application_version][:version_label]
+          :version_label     => version.application_version.version_label
         }
         eb.update_environment(options)
       end
